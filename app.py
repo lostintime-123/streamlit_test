@@ -295,9 +295,12 @@ class SemanticSearcher:
 # 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
-# 从环境变量中获取API配置
+# 从Streamlit secrets获取API配置
 if "api_key" not in st.session_state:
-    st.session_state.api_key = os.environ.get("DEEPSEEK_API_KEY", "")
+    if "DEEPSEEK_API_KEY" in st.secrets:
+        st.session_state.api_key = st.secrets["DEEPSEEK_API_KEY"]
+    else:
+        st.session_state.api_key = ""
 if "base_url" not in st.session_state:
     st.session_state.base_url = "https://api.deepseek.com/v1"
 if "loader" not in st.session_state:
