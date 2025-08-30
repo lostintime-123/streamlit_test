@@ -10,6 +10,8 @@ import numpy as np
 import threading
 from contextlib import contextmanager
 import re
+import requests
+from io import BytesIO
 
 # 初始的品牌和型号映射（将作为备选）
 INITIAL_BRAND_MODEL_MAPPING = {
@@ -83,15 +85,39 @@ class RobustDataLoader:
     def __init__(self):
         self.df = None
         self.data_loaded = False
+        self.error_message = None  # 添加错误信息属性
     
-    def load_from_excel(self, uploaded_file):
+    def load_from_excel(self, file_obj):
         """从Excel文件加载数据"""
         try:
             # 重置加载状态
             self.data_loaded = False
+            self.error_message = None  # 重置错误信息
 
+            # 尝试确定文件类型并选择合适的引擎
+            if hasattr(file_obj, 'name'):
+                file_name = file_obj.name.lower()
+                if file_name.endswith('.xlsx'):
+                    engine = 'openpyxl'
+                elif file_name.endswith('.xls'):
+                    engine = 'xlrd'
+                else:
+                    # 默认使用openpyxl
+                    engine = 'openpyxl'
+            else:
+                # 对于没有文件名的对象（如BytesIO），尝试两种引擎
+                engine = None
+            
             # 读取Excel文件
-            excel_file = pd.ExcelFile(uploaded_file)
+            if engine:
+                excel_file = pd.ExcelFile(file_obj, engine=engine)
+            else:
+                # 尝试自动检测引擎
+                try:
+                    excel_file = pd.ExcelFile(file_obj, engine='openpyxl')
+                except:
+                    excel_file = pd.ExcelFile(file_obj, engine='xlrd')
+            
             sheet_names = excel_file.sheet_names
             
             # 读取所有子表并合并
@@ -99,7 +125,14 @@ class RobustDataLoader:
             for sheet_name in sheet_names:
                 try:
                     # 读取时不转换数据类型，保持原始格式
-                    sheet_df = pd.read_excel(uploaded_file, sheet_name=sheet_name, dtype=str)
+                    if engine:
+                        sheet_df = pd.read_excel(file_obj, sheet_name=sheet_name, dtype=str, engine=engine)
+                    else:
+                        # 尝试自动检测引擎
+                        try:
+                            sheet_df = pd.read_excel(file_obj, sheet_name=sheet_name, dtype=str, engine='openpyxl')
+                        except:
+                            sheet_df = pd.read_excel(file_obj, sheet_name=sheet_name, dtype=str, engine='xlrd')
                     
                     # 检查是否为空表
                     if sheet_df.empty:
@@ -117,7 +150,8 @@ class RobustDataLoader:
                     st.warning(f"读取工作表 '{sheet_name}' 时出错: {e}，已跳过")
             
             if not all_sheets:
-                st.error("没有成功读取任何工作表，请检查Excel文件格式")
+                self.error_message = "没有成功读取任何工作表，请检查Excel文件格式"
+                st.error(self.error_message)
                 return False
             
             # 合并所有子表
@@ -163,7 +197,8 @@ class RobustDataLoader:
             missing_columns = [col for col in required_columns if col not in self.df.columns]
             
             if missing_columns:
-                st.error(f"Excel文件中缺少必要的列: {missing_columns}")
+                self.error_message = f"Excel文件中缺少必要的列: {missing_columns}"
+                st.error(self.error_message)
                 return False
             
             # 关键修改：确保所有列的数据类型一致
@@ -187,9 +222,10 @@ class RobustDataLoader:
             
         except Exception as e:
             self.data_loaded = False
-            st.error(f"加载数据时出错: {e}")
+            self.error_message = f"加载数据时出错: {e}"
+            st.error(self.error_message)
             return False
-    
+
     def search_by_pandas(self, model=None, alarm_code=None, limit=1000):
         """使用pandas进行精确查询"""
         if not self.data_loaded or self.df is None:
@@ -295,12 +331,8 @@ class SemanticSearcher:
 # 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
-# 从Streamlit secrets获取API配置
 if "api_key" not in st.session_state:
-    if "DEEPSEEK_API_KEY" in st.secrets:
-        st.session_state.api_key = st.secrets["DEEPSEEK_API_KEY"]
-    else:
-        st.session_state.api_key = ""
+    st.session_state.api_key = "sk-5c6a834335c04af299527faa0779dc87"
 if "base_url" not in st.session_state:
     st.session_state.base_url = "https://api.deepseek.com/v1"
 if "loader" not in st.session_state:
@@ -318,6 +350,8 @@ if "current_results" not in st.session_state:
     st.session_state.current_results = []
 if "brand_model_mapping" not in st.session_state:
     st.session_state.brand_model_mapping = INITIAL_BRAND_MODEL_MAPPING
+if "github_url" not in st.session_state:
+    st.session_state.github_url = "https://raw.githubusercontent.com/lostintime-123/streamlit_test/refs/heads/main/data.xlsx"
 
 # 侧边栏导航
 st.sidebar.title("🔧 数控设备故障诊断系统")
@@ -356,47 +390,146 @@ alarm_code = st.sidebar.text_input("报警代码（可选）", "")
 
 # 数据上传
 st.sidebar.header("📤 数据上传")
-uploaded_file = st.sidebar.file_uploader("上传故障数据Excel文件", type=["xlsx", "xls"])
 
-# 检查是否需要重新加载数据
-if uploaded_file is not None:
-    # 检查是否是新的文件
-    if uploaded_file != st.session_state.last_uploaded_file:
-        st.session_state.last_uploaded_file = uploaded_file
-        st.session_state.data_loaded = False
-        
-    if st.sidebar.button("加载数据"):
-        try:
-            if st.session_state.loader.load_from_excel(uploaded_file):
-                st.session_state.df = st.session_state.loader.df
-                st.session_state.data_loaded = True
-                
-                # 初始化语义搜索器
-                st.session_state.searcher = SemanticSearcher(st.session_state.df)
-                
-                # 从数据中提取品牌和型号映射
-                extracted_mapping = extract_brand_model_mapping(st.session_state.df)
-                if extracted_mapping:
-                    st.session_state.brand_model_mapping = extracted_mapping
-                    st.sidebar.success(f"数据加载成功！共 {len(st.session_state.df)} 条记录，已自动更新品牌和型号列表")
-                else:
-                    st.session_state.brand_model_mapping = INITIAL_BRAND_MODEL_MAPPING
-                    st.sidebar.success(f"数据加载成功！共 {len(st.session_state.df)} 条记录，但未能提取品牌和型号信息，使用默认映射")
-                
-                st.rerun()
-            else:
-                st.sidebar.error("数据加载失败")
-        except Exception as e:
-            st.sidebar.error(f"数据加载失败: {e}")
+# 使用选项卡布局
+data_tab1, data_tab2 = st.sidebar.tabs(["上传文件", "GitHub地址"])
+
+with data_tab1:
+    uploaded_file = st.file_uploader("上传故障数据Excel文件", type=["xlsx", "xls"], key="file_uploader")
     
-    # 显示数据加载状态
-    if st.session_state.data_loaded:
-        st.sidebar.success("数据已加载")
+    # 检查是否需要重新加载数据
+    if uploaded_file is not None:
+        # 检查是否是新的文件
+        if uploaded_file != st.session_state.last_uploaded_file:
+            st.session_state.last_uploaded_file = uploaded_file
+            st.session_state.data_loaded = False
+            
+        if st.button("加载数据", key="load_uploaded"):
+            try:
+                if st.session_state.loader.load_from_excel(uploaded_file):
+                    st.session_state.df = st.session_state.loader.df
+                    st.session_state.data_loaded = True
+                    
+                    # 初始化语义搜索器
+                    st.session_state.searcher = SemanticSearcher(st.session_state.df)
+                    
+                    # 从数据中提取品牌和型号映射
+                    extracted_mapping = extract_brand_model_mapping(st.session_state.df)
+                    if extracted_mapping:
+                        st.session_state.brand_model_mapping = extracted_mapping
+                        # st.success(f"数据加载成功！共 {len(st.session_state.df)} 条记录，已自动更新品牌和型号列表")
+                    else:
+                        st.session_state.brand_model_mapping = INITIAL_BRAND_MODEL_MAPPING
+                        # st.success(f"数据加载成功！共 {len(st.session_state.df)} 条记录，但未能提取品牌和型号信息，使用默认映射")
+                    
+                    st.rerun()
+                else:
+                    st.error("数据加载失败")
+            except Exception as e:
+                st.error(f"数据加载失败: {e}")
+        
+        # 显示数据加载状态
+        if st.session_state.data_loaded:
+            st.success("数据已加载")
+        else:
+            st.warning("数据未加载，请点击'加载数据'按钮")
     else:
-        st.sidebar.warning("数据未加载，请点击'加载数据'按钮")
-else:
-    st.session_state.data_loaded = False
-    st.session_state.last_uploaded_file = None
+        # 仅当用户真的点过上传区域但没有文件时，才重置
+        if st.session_state.last_uploaded_file is not None:
+            st.session_state.data_loaded = False
+            st.session_state.last_uploaded_file = None
+
+with data_tab2:
+    github_url = st.text_input(
+        "GitHub文件地址", 
+        value=st.session_state.github_url,
+        placeholder="例如: https://raw.githubusercontent.com/用户名/仓库名/分支名/文件名.xlsx",
+        key="github_url_input"
+    )
+    
+    if st.button("从GitHub加载", key="load_github"):
+        if not github_url:
+            st.error("请输入GitHub文件地址")
+        else:
+            try:
+                # 验证URL格式
+                if not github_url.startswith(('http://', 'https://')):
+                    st.error("请输入有效的URL地址")
+                elif 'raw.githubusercontent.com' not in github_url:
+                    # 如果用户提供了普通的GitHub URL，尝试转换为raw URL
+                    st.warning("建议使用raw.githubusercontent.com格式的URL")
+                
+                # 显示加载进度
+                with st.spinner("加载GitHub文件..."):
+                    # 添加请求头模拟浏览器访问
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                    }
+                    
+                    # 发送请求获取文件
+                    response = requests.get(github_url, headers=headers)
+                    
+                    # 检查响应状态
+                    if response.status_code != 200:
+                        st.error(f"下载失败，HTTP状态码: {response.status_code}")
+                        st.error(f"响应内容: {response.text[:200]}...")
+                        st.stop()
+                    
+                    # 检查内容类型
+                    content_type = response.headers.get('content-type', '')
+                    if 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' not in content_type and \
+                       'application/octet-stream' not in content_type:
+                        st.warning(f"下载的内容类型可能不是Excel文件: {content_type}")
+                    
+                    # 将内容转换为文件对象
+                    file_obj = BytesIO(response.content)
+                    
+                    # 添加调试信息
+                    st.info(f"下载成功，文件大小: {len(response.content)} 字节")
+                    
+                    # 创建一个新的数据加载器实例，确保状态正确
+                    new_loader = RobustDataLoader()
+                    
+                    # 加载数据 - 添加调试信息
+                    load_success = new_loader.load_from_excel(file_obj)
+                    
+                    if load_success:
+                        # 更新会话状态
+                        st.session_state.loader = new_loader
+                        st.session_state.df = new_loader.df
+                        st.session_state.data_loaded = True
+                        st.session_state.github_url = github_url
+                        
+                        # 初始化语义搜索器
+                        st.session_state.searcher = SemanticSearcher(st.session_state.df)
+                        
+                        # 从数据中提取品牌和型号映射
+                        extracted_mapping = extract_brand_model_mapping(st.session_state.df)
+                        # st.info(f"提取的品牌型号映射: {extracted_mapping}")
+                        
+                        if extracted_mapping:
+                            st.session_state.brand_model_mapping = extracted_mapping
+                            # 使用toast显示成功消息
+                            # st.info(f"数据加载成功！共 {len(st.session_state.df)} 条记录，已自动更新品牌和型号列表", icon="✅")
+                        else:
+                            st.session_state.brand_model_mapping = INITIAL_BRAND_MODEL_MAPPING
+                            # st.info(f"数据加载成功！共 {len(st.session_state.df)} 条记录，但未能提取品牌和型号信息，使用默认映射", icon="✅")
+                        
+                        # 强制刷新页面
+                        st.rerun()
+                    else:
+                        st.error("数据加载失败")
+                        # 显示加载器的错误信息（如果有）
+                        if hasattr(new_loader, 'error_message') and new_loader.error_message:
+                            st.error(f"错误详情: {new_loader.error_message}")
+                            
+            except requests.exceptions.RequestException as e:
+                st.error(f"下载文件失败: {e}")
+            except Exception as e:
+                st.error(f"加载数据时出错: {e}")
+
+    if st.session_state.github_url and st.session_state.data_loaded:
+        st.success(f"已从GitHub加载数据: {st.session_state.github_url}")
         
 # 会话管理
 st.sidebar.header("💬 会话管理")
@@ -507,7 +640,7 @@ if page == "聊天页面":
                 # 保存当前结果
                 st.session_state.current_results = results
                 
-                # 调试信息
+                # #调试信息
                 # debug_info += f"最终结果数量: {len(results)}\n"
                 # if results:
                 #     debug_info += f"第一个结果的报警代码: {results[0]['data'].get('报警代码_原始', '未知')}\n"
@@ -614,7 +747,9 @@ if page == "聊天页面":
 elif page == "数据展示":
     st.title("📊 数据展示")
     
-    if not st.session_state.data_loaded or st.session_state.df is None:
+    # 检查数据加载状态 - 同时检查loader和df状态
+    if not hasattr(st.session_state, 'data_loaded') or not st.session_state.data_loaded or \
+       not hasattr(st.session_state, 'df') or st.session_state.df is None:
         st.warning("请先上传并加载数据")
     else:
         st.success(f"已加载 {len(st.session_state.df)} 条故障记录")
@@ -693,6 +828,7 @@ elif page == "使用说明":
        
     3. **上传数据**
        - 在侧边栏上传包含故障信息的Excel文件
+       - 或者输入GitHub文件地址（需要是原始文件地址）
        - 点击"加载数据"按钮
        - 系统会自动从数据中提取品牌和型号信息并更新下拉选项
        
@@ -710,6 +846,7 @@ elif page == "使用说明":
     - 报警代码会自动规范化处理（去除开头多余的0）
     - 确保Excel文件包含必要的列：序号、报警代码、故障现象、原因、处理方法、故障类型、型号
     - 如果Excel文件中包含品牌和产品类型列，系统会自动提取这些信息并更新下拉选项
+    - GitHub文件地址需要是原始文件地址（raw格式），例如：https://raw.githubusercontent.com/用户名/仓库名/refs/heads/main/data.xlsx
     """)
 
 # 运行说明
