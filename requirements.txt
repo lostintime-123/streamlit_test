@@ -7,3 +7,4 @@ numpy==1.26.4
 torch==2.6.0
 transformers==4.52.4
 tqdm==4.67.1
+openpyxl
