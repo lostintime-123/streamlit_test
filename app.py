@@ -351,7 +351,7 @@ if "current_results" not in st.session_state:
 if "brand_model_mapping" not in st.session_state:
     st.session_state.brand_model_mapping = INITIAL_BRAND_MODEL_MAPPING
 if "github_url" not in st.session_state:
-    st.session_state.github_url = "https://raw.githubusercontent.com/lostintime-123/streamlit_test/refs/heads/main/data.xlsx"
+    st.session_state.github_url = "https://github.com/lostintime-123/streamlit_test/raw/refs/heads/main/data.xlsx"
 
 # 侧边栏导航
 st.sidebar.title("🔧 数控设备故障诊断系统")
@@ -443,7 +443,7 @@ with data_tab2:
     github_url = st.text_input(
         "GitHub文件地址", 
         value=st.session_state.github_url,
-        placeholder="例如: https://raw.githubusercontent.com/用户名/仓库名/分支名/文件名.xlsx",
+        placeholder="例如: https://github.com/用户名/项目名/raw/refs/heads/main/文件名.xlsx",
         key="github_url_input"
     )
     
@@ -455,9 +455,9 @@ with data_tab2:
                 # 验证URL格式
                 if not github_url.startswith(('http://', 'https://')):
                     st.error("请输入有效的URL地址")
-                elif 'raw.githubusercontent.com' not in github_url:
+                elif 'raw' not in github_url:
                     # 如果用户提供了普通的GitHub URL，尝试转换为raw URL
-                    st.warning("建议使用raw.githubusercontent.com格式的URL")
+                    st.warning("建议使用包含raw格式的URL")
                 
                 # 显示加载进度
                 with st.spinner("加载GitHub文件..."):
@@ -846,7 +846,7 @@ elif page == "使用说明":
     - 报警代码会自动规范化处理（去除开头多余的0）
     - 确保Excel文件包含必要的列：序号、报警代码、故障现象、原因、处理方法、故障类型、型号
     - 如果Excel文件中包含品牌和产品类型列，系统会自动提取这些信息并更新下拉选项
-    - GitHub文件地址需要是原始文件地址（raw格式），例如：https://raw.githubusercontent.com/用户名/仓库名/refs/heads/main/data.xlsx
+    - GitHub文件地址需要是原始文件地址（raw格式），例如：https://github.com/用户名/项目名/raw/refs/heads/main/文件名.xlsx
     """)
 
 # 运行说明
