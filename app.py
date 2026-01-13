@@ -332,7 +332,7 @@ class SemanticSearcher:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "api_key" not in st.session_state:
-    st.session_state.api_key = "sk-5c6a834335c04af299527faa0779dc87"
+    st.session_state.api_key = ""
 if "base_url" not in st.session_state:
     st.session_state.base_url = "https://api.deepseek.com/v1"
 if "loader" not in st.session_state:
