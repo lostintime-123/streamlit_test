@@ -332,7 +332,7 @@ class SemanticSearcher:
 if "messages" not in st.session_state:
     st.session_state.messages = []
 if "api_key" not in st.session_state:
-    st.session_state.api_key = ""
+    st.session_state.api_key = st.secrets.get("DEEPSEEK_API_KEY", "")
 if "base_url" not in st.session_state:
     st.session_state.base_url = "https://api.deepseek.com/v1"
 if "loader" not in st.session_state:
@@ -359,7 +359,7 @@ page = st.sidebar.radio("导航", ["聊天页面", "数据展示", "使用说明
 
 # API配置
 st.sidebar.header("⚙️ API配置")
-api_key = st.sidebar.text_input("大模型API密钥", value=st.session_state.api_key, type="password")
+api_key = st.sidebar.text_input("大模型API密钥", value="", type="password")
 base_url = st.sidebar.text_input("API基础URL", value=st.session_state.base_url)
 
 if st.sidebar.button("保存API配置"):
